@@ -112,6 +112,8 @@ interface BreakdownLine {
   label: string;
   group: 'LLM Usage' | 'Infrastructure';
   cost: number;
+  /** per-line explanation (token usage + cost split for LLM steps) */
+  detail?: string;
 }
 
 /* ------------------------------------------------------------------ *
@@ -137,9 +139,9 @@ export default function App() {
       const inTokens = monthlyResumes * INPUT_TOKENS;
       const outTokens = monthlyResumes * OUTPUT_TOKENS;
       const model = LLM_MODELS[feat.model];
-      const cost =
-        (inTokens / 1_000_000) * model.inputPer1M +
-        (outTokens / 1_000_000) * model.outputPer1M;
+      const inCost = (inTokens / 1_000_000) * model.inputPer1M;
+      const outCost = (outTokens / 1_000_000) * model.outputPer1M;
+      const cost = inCost + outCost;
 
       totalTokens += inTokens + outTokens;
       llmTotal += cost;
@@ -148,6 +150,9 @@ export default function App() {
         label: `${feat.name} · ${model.name}`,
         group: 'LLM Usage',
         cost,
+        detail:
+          `${fmtCompact(inTokens)} in (${fmtUSD(inCost)}) + ` +
+          `${fmtCompact(outTokens)} out (${fmtUSD(outCost)})`,
       });
     });
 
@@ -411,19 +416,26 @@ export default function App() {
                 {costs.breakdown.map((item, idx) => (
                   <div
                     key={idx}
-                    className="flex items-start justify-between border-b border-slate-800 pb-2 text-xs"
+                    className="border-b border-slate-800 pb-2 text-xs"
                   >
-                    <span className="pr-2 text-slate-300">
-                      <span
-                        className={`mr-1.5 font-medium ${groupColors[item.group]}`}
-                      >
-                        ●
+                    <div className="flex items-start justify-between">
+                      <span className="pr-2 text-slate-300">
+                        <span
+                          className={`mr-1.5 font-medium ${groupColors[item.group]}`}
+                        >
+                          ●
+                        </span>
+                        {item.label}
                       </span>
-                      {item.label}
-                    </span>
-                    <span className="whitespace-nowrap font-mono text-slate-100">
-                      {fmtUSD(item.cost)}
-                    </span>
+                      <span className="whitespace-nowrap font-mono text-slate-100">
+                        {fmtUSD(item.cost)}
+                      </span>
+                    </div>
+                    {item.detail && (
+                      <div className="mt-1 pl-3.5 font-mono text-[11px] text-slate-500">
+                        {item.detail}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
