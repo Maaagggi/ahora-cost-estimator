@@ -151,8 +151,8 @@ export default function App() {
         group: 'LLM Usage',
         cost,
         detail: [
-          `${fmtCompact(inTokens)} input × ${fmtUSD(model.inputPer1M)}/M = ${fmtUSD(inCost)}`,
-          `${fmtCompact(outTokens)} output × ${fmtUSD(model.outputPer1M)}/M = ${fmtUSD(outCost)}`,
+          `in: ${fmtNum(monthlyResumes)} × ${fmtNum(INPUT_TOKENS)} = ${fmtCompact(inTokens)} × ${fmtUSD(model.inputPer1M)}/M = ${fmtUSD(inCost)}`,
+          `out: ${fmtNum(monthlyResumes)} × ${fmtNum(OUTPUT_TOKENS)} = ${fmtCompact(outTokens)} × ${fmtUSD(model.outputPer1M)}/M = ${fmtUSD(outCost)}`,
         ],
       });
     });
@@ -414,8 +414,8 @@ export default function App() {
                 Cost breakdown
               </h3>
               <p className="mb-3 text-[11px] text-slate-500">
-                Monthly tokens = {fmtNum(monthlyResumes)} resumes ×{' '}
-                ({fmtNum(INPUT_TOKENS)} in + {fmtNum(OUTPUT_TOKENS)} out) per step.
+                Each step: resumes × tokens/resume = monthly tokens × model rate
+                = cost.
               </p>
               <div className="space-y-2">
                 {costs.breakdown.map((item, idx) => (
