@@ -15,7 +15,7 @@ editable in the UI.
 | --- | --- | --- |
 | DeepSeek-V4 Flash (Global) | $0.19 | $0.51 |
 | DeepSeek-V4 Pro (Global) | $1.74 | $3.48 |
-| Claude Sonnet 4.6 | $2.00 | $8.00 |
+| GPT-4.1 | $2.00 | $8.00 |
 
 **Infrastructure** (monthly)
 

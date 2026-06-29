@@ -26,7 +26,7 @@ interface LLMModel {
   outputPer1M: number;
 }
 
-type LLMKey = 'deepseek-flash' | 'deepseek-pro' | 'claude-sonnet-46';
+type LLMKey = 'deepseek-flash' | 'deepseek-pro' | 'gpt-41';
 
 const LLM_MODELS: Record<LLMKey, LLMModel> = {
   'deepseek-flash': {
@@ -39,8 +39,8 @@ const LLM_MODELS: Record<LLMKey, LLMModel> = {
     inputPer1M: 1.74,
     outputPer1M: 3.48,
   },
-  'claude-sonnet-46': {
-    name: 'Claude Sonnet 4.6',
+  'gpt-41': {
+    name: 'GPT-4.1',
     inputPer1M: 2.0,
     outputPer1M: 8.0,
   },
@@ -163,7 +163,7 @@ export default function App() {
   // Architecture
   const [arch, setArch] = useState<Architecture>({
     extractionLLM: 'deepseek-flash',
-    reasoningLLM: 'claude-sonnet-46',
+    reasoningLLM: 'gpt-41',
     vmCount: 1,
   });
 
