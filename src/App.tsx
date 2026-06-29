@@ -1,15 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  Activity,
-  Boxes,
-  Calculator,
-  Cpu,
-  Database,
+  FileText,
   Info,
-  Plus,
+  Receipt,
   Server,
-  Sparkles,
+  Tag,
   Trash2,
+  Workflow,
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ *
@@ -112,7 +109,7 @@ interface BreakdownLine {
   label: string;
   group: 'LLM Usage' | 'Infrastructure';
   cost: number;
-  /** per-line explanation rows (token × rate = cost for LLM steps) */
+  /** per-line explanation rows (resumes × tokens = total × rate = cost) */
   detail?: string[];
 }
 
@@ -121,11 +118,8 @@ interface BreakdownLine {
  * ------------------------------------------------------------------ */
 
 export default function App() {
-  // Volume / traffic
   const [monthlyResumes, setMonthlyResumes] = useState(500);
   const [totalResumesStored, setTotalResumesStored] = useState(0);
-
-  // Pipeline steps
   const [features, setFeatures] = useState<Feature[]>(INITIAL_FEATURES);
 
   const costs = useMemo(() => {
@@ -176,7 +170,6 @@ export default function App() {
     };
   }, [monthlyResumes, totalResumesStored, features]);
 
-  // Feature handlers
   const updateFeature = <K extends keyof Feature>(
     id: string,
     field: K,
@@ -186,54 +179,36 @@ export default function App() {
       prev.map((f) => (f.id === id ? { ...f, [field]: value } : f)),
     );
   };
-  const addFeature = () => {
-    setFeatures((prev) => [
-      ...prev,
-      {
-        id: `f${prev.length + 1}-${prev.reduce((m, f) => m + f.name.length, 0)}`,
-        name: 'New Step',
-        model: 'deepseek-pro',
-      },
-    ]);
-  };
   const removeFeature = (id: string) =>
     setFeatures((prev) => prev.filter((f) => f.id !== id));
 
-  const groupColors: Record<BreakdownLine['group'], string> = {
-    'LLM Usage': 'text-sky-300',
-    Infrastructure: 'text-emerald-300',
-  };
-
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 md:px-8">
+    <div className="min-h-screen">
+      <div className="mx-auto max-w-6xl space-y-8 px-5 py-10 md:px-8 md:py-14">
         {/* Header */}
-        <header className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-md">
-            <Calculator size={22} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              AHORA · AI Recruitment Cost Estimator
-            </h1>
-            <p className="text-sm text-slate-500">
-              Edit the volume, pipeline, and models — the monthly cost updates
-              live.
-            </p>
-          </div>
+        <header>
+          <p className="text-xs font-medium uppercase tracking-[0.22em] text-accent">
+            AHORA
+          </p>
+          <h1 className="mt-1 text-3xl font-bold leading-tight tracking-tight text-ink md:text-4xl">
+            AI Recruitment Cost Estimator
+          </h1>
+          <p className="mt-3 max-w-xl text-ink-soft">
+            Edit the volume, pipeline, and models. The monthly cost updates live.
+          </p>
         </header>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Left: cost drivers */}
           <div className="space-y-6 lg:col-span-2">
             {/* Volume */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-xl border border-line bg-card p-6">
               <SectionHeader
-                icon={<Activity size={18} className="text-indigo-500" />}
+                icon={<FileText size={16} strokeWidth={1.75} />}
                 title="Volume & Data"
                 subtitle="Monthly throughput that drives token usage and storage."
               />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <NumberField
                   label="Resumes processed / month"
                   value={monthlyResumes}
@@ -244,51 +219,42 @@ export default function App() {
                   label="Total resumes in database"
                   value={totalResumesStored}
                   onChange={setTotalResumesStored}
-                  hint="Cumulative store — checked against the 2GB Postgres tier."
+                  hint="Cumulative store, checked against the 2 GB Postgres tier."
                 />
               </div>
             </section>
 
             {/* Pipeline steps */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
-                <SectionHeader
-                  icon={<Cpu size={18} className="text-violet-500" />}
-                  title="AI Pipeline Steps"
-                  subtitle="Each AI step runs once per resume. Pick the model for each — changing it updates the cost on the right."
-                  flush
-                />
-                <button
-                  onClick={addFeature}
-                  className="flex shrink-0 items-center gap-2 rounded-md bg-violet-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-violet-700"
-                >
-                  <Plus size={16} /> Add Step
-                </button>
-              </div>
+            <section className="rounded-xl border border-line bg-card p-6">
+              <SectionHeader
+                icon={<Workflow size={16} strokeWidth={1.75} />}
+                title="AI Pipeline Steps"
+                subtitle="Each AI step runs once per resume. Pick a model per step; the cost on the right updates instantly."
+              />
 
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[400px] text-left text-sm">
-                  <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
-                    <tr>
-                      <th className="rounded-l-lg p-3">Step</th>
-                      <th className="p-3">LLM Model</th>
-                      <th className="rounded-r-lg p-3" />
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full min-w-[400px] border-separate border-spacing-y-1 text-left text-sm">
+                  <thead>
+                    <tr className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+                      <th className="px-2 pb-1 font-medium">Step</th>
+                      <th className="px-2 pb-1 font-medium">LLM Model</th>
+                      <th className="w-10 pb-1" />
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody>
                     {features.map((feat) => (
-                      <tr key={feat.id} className="hover:bg-slate-50">
-                        <td className="p-2">
+                      <tr key={feat.id}>
+                        <td className="pr-2">
                           <input
                             type="text"
                             value={feat.name}
                             onChange={(e) =>
                               updateFeature(feat.id, 'name', e.target.value)
                             }
-                            className="w-full rounded border border-slate-300 p-2 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-ink outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
                           />
                         </td>
-                        <td className="p-2">
+                        <td className="pr-2">
                           <select
                             value={feat.model}
                             onChange={(e) =>
@@ -298,7 +264,7 @@ export default function App() {
                                 e.target.value as LLMKey,
                               )
                             }
-                            className="w-full rounded border border-slate-300 bg-white p-2 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-ink outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
                           >
                             {Object.entries(LLM_MODELS).map(([key, m]) => (
                               <option key={key} value={key}>
@@ -307,13 +273,13 @@ export default function App() {
                             ))}
                           </select>
                         </td>
-                        <td className="p-2 text-center">
+                        <td className="text-center">
                           <button
                             onClick={() => removeFeature(feat.id)}
-                            className="rounded-full p-2 text-rose-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                            className="rounded-md p-2 text-ink-faint transition-colors hover:text-accent"
                             aria-label="Remove step"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} strokeWidth={1.75} />
                           </button>
                         </td>
                       </tr>
@@ -322,63 +288,48 @@ export default function App() {
                 </table>
               </div>
 
-              <div className="mt-4 flex gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-                <Info size={16} className="mt-0.5 shrink-0 text-blue-500" />
-                <span>
-                  Each step assumes{' '}
-                  <strong>
-                    ~{fmtNum(INPUT_TOKENS)} input + {fmtNum(OUTPUT_TOKENS)} output
-                    tokens / resume
-                  </strong>
-                  , priced at the selected model's input & output rates.
-                </span>
-              </div>
+              <Note>
+                Each step assumes{' '}
+                <strong className="font-medium text-ink">
+                  ~{fmtNum(INPUT_TOKENS)} input and {fmtNum(OUTPUT_TOKENS)} output
+                  tokens per resume
+                </strong>
+                , priced at the selected model's input and output rates.
+              </Note>
             </section>
 
             {/* Infrastructure — fixed baseline */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="rounded-xl border border-line bg-card p-6">
               <SectionHeader
-                icon={<Server size={18} className="text-emerald-500" />}
+                icon={<Server size={16} strokeWidth={1.75} />}
                 title="Infrastructure"
-                subtitle="Fixed monthly baseline — independent of resume volume."
+                subtitle="Fixed monthly baseline, independent of resume volume."
               />
-              <ul className="space-y-2 text-sm">
+              <ul className="mt-5 space-y-1.5 text-sm">
+                <RefItem label={VM_LABEL} value={`${fmtUSD(INFRA.vm)} / mo`} />
                 <RefItem
-                  icon={<Server size={14} className="text-emerald-500" />}
-                  label={VM_LABEL}
-                  value={`${fmtUSD(INFRA.vm)} / mo`}
-                />
-                <RefItem
-                  icon={<Database size={14} className="text-amber-500" />}
                   label={PG_LABEL}
                   value={`${fmtUSD(INFRA.postgres)} / mo`}
                 />
               </ul>
-              <div
-                className={`mt-3 flex gap-2 rounded-lg border p-3 text-xs ${
-                  costs.overCapacity
-                    ? 'border-amber-200 bg-amber-50 text-amber-800'
-                    : 'border-blue-100 bg-blue-50 text-blue-800'
-                }`}
-              >
-                <Info
-                  size={16}
-                  className={`mt-0.5 shrink-0 ${
-                    costs.overCapacity ? 'text-amber-500' : 'text-blue-500'
-                  }`}
-                />
-                <span>
-                  <strong>Assumption:</strong> a single VM + one{' '}
-                  {SIZING.pgInstanceCapacityGB}&nbsp;GB Postgres instance, which
-                  holds embeddings + metadata for up to{' '}
-                  <strong>~{fmtNum(PG_CAPACITY_RESUMES)} resumes</strong> (
-                  {SIZING.kbPerEmbedding} KB each).{' '}
-                  {costs.overCapacity
-                    ? `Your store of ${fmtNum(totalResumesStored)} exceeds this — additional instances would be needed.`
-                    : 'Beyond that, additional instances would be added.'}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-slate-400">
+              {costs.overCapacity ? (
+                <Note tone="warn">
+                  <strong className="font-medium">Over capacity:</strong> the 2 GB
+                  Postgres tier holds embeddings for ~
+                  {fmtNum(PG_CAPACITY_RESUMES)} resumes ({SIZING.kbPerEmbedding} KB
+                  each). Your store of {fmtNum(totalResumesStored)} exceeds it, so
+                  additional instances would be needed.
+                </Note>
+              ) : (
+                <Note>
+                  <strong className="font-medium text-ink">Assumption:</strong> a
+                  single VM and one {SIZING.pgInstanceCapacityGB} GB Postgres
+                  instance, which holds embeddings and metadata for up to ~
+                  {fmtNum(PG_CAPACITY_RESUMES)} resumes ({SIZING.kbPerEmbedding} KB
+                  each). Beyond that, additional instances would be added.
+                </Note>
+              )}
+              <p className="mt-2 text-xs text-ink-faint">
                 Not included: raw resume files in Azure Blob (~
                 {fmtUSD(INFRA.blobPerGB)}/GB/mo, negligible).
               </p>
@@ -387,57 +338,63 @@ export default function App() {
 
           {/* Right: summary */}
           <aside className="lg:col-span-1">
-            <div className="sticky top-6 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-800 p-6 text-white shadow-xl">
-              <h2 className="mb-5 flex items-center gap-2 border-b border-slate-700 pb-3 text-base font-semibold text-slate-200">
-                <Sparkles size={18} className="text-indigo-400" />
-                Monthly Estimate
-              </h2>
-
-              <div className="mb-5 space-y-3 text-sm">
-                <Row label="LLM usage" value={fmtUSD(costs.llmTotal)} />
-                <Row label="Fixed infrastructure" value={fmtUSD(costs.fixedTotal)} />
-                <div className="flex items-center justify-between border-t border-slate-700 pt-4">
-                  <span className="font-semibold text-slate-100">Total / month</span>
-                  <span className="font-mono text-2xl font-bold text-emerald-400">
-                    {fmtUSD(costs.total)}
-                  </span>
-                </div>
+            <div className="sticky top-6 rounded-xl bg-panel p-6 text-paper shadow-lg">
+              <div className="flex items-center gap-2 border-b border-panel-line pb-3 text-paper/80">
+                <Receipt size={16} strokeWidth={1.75} />
+                <h2 className="text-sm font-semibold uppercase tracking-wider">
+                  Monthly Estimate
+                </h2>
               </div>
 
-              <div className="mb-5 grid grid-cols-3 gap-2 text-center">
+              <div className="mt-5 space-y-2.5 text-sm">
+                <Row label="LLM usage" value={fmtUSD(costs.llmTotal)} />
+                <Row label="Fixed infrastructure" value={fmtUSD(costs.fixedTotal)} />
+              </div>
+
+              <div className="mt-4 flex items-end justify-between border-t border-panel-line pt-4">
+                <span className="text-sm text-paper/70">Total / month</span>
+                <span className="font-mono text-3xl font-medium tracking-tight text-paper">
+                  {fmtUSD(costs.total)}
+                </span>
+              </div>
+
+              <div className="mt-5 grid grid-cols-3 gap-2 text-center">
                 <Stat label="Per resume" value={fmtUSD(costs.perResume, 3)} />
                 <Stat label="Annual" value={fmtUSD(costs.annual)} />
                 <Stat label="Tokens / mo" value={fmtCompact(costs.totalTokens)} />
               </div>
 
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wider text-paper/70">
                 Cost breakdown
               </h3>
-              <p className="mb-3 text-[11px] text-slate-500">
-                Each step: resumes × tokens/resume = monthly tokens × model rate
-                = cost.
+              <p className="mb-3 mt-1 text-[11px] text-paper/60">
+                resumes × tokens/resume = monthly tokens × model rate = cost
               </p>
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {costs.breakdown.map((item, idx) => (
                   <div
                     key={idx}
-                    className="border-b border-slate-800 pb-2 text-xs"
+                    className="border-b border-panel-line/60 pb-2.5 text-xs last:border-0"
                   >
-                    <div className="flex items-start justify-between">
-                      <span className="pr-2 text-slate-300">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-paper/85">
                         <span
-                          className={`mr-1.5 font-medium ${groupColors[item.group]}`}
+                          className={`mr-1.5 ${
+                            item.group === 'LLM Usage'
+                              ? 'text-accent'
+                              : 'text-paper/35'
+                          }`}
                         >
                           ●
                         </span>
                         {item.label}
                       </span>
-                      <span className="whitespace-nowrap font-mono text-slate-100">
+                      <span className="whitespace-nowrap font-mono text-paper">
                         {fmtUSD(item.cost)}
                       </span>
                     </div>
                     {item.detail && (
-                      <div className="mt-1 space-y-0.5 pl-3.5 font-mono text-[11px] text-slate-500">
+                      <div className="mt-1.5 space-y-0.5 pl-3.5 font-mono text-[11px] text-paper/65">
                         {item.detail.map((line, i) => (
                           <div key={i}>{line}</div>
                         ))}
@@ -451,28 +408,28 @@ export default function App() {
         </div>
 
         {/* Pricing reference (read-only LLM rates, full width) */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-xl border border-line bg-card p-6">
           <SectionHeader
-            icon={<Boxes size={18} className="text-amber-500" />}
+            icon={<Tag size={16} strokeWidth={1.75} />}
             title="LLM Reference Pricing"
             subtitle="Per-million-token rates behind each model in the pipeline."
           />
-          <table className="w-full max-w-xl text-sm">
-            <thead className="text-xs uppercase text-slate-400">
-              <tr>
-                <th className="py-1 text-left">Model</th>
-                <th className="py-1 text-right">Input / 1M</th>
-                <th className="py-1 text-right">Output / 1M</th>
+          <table className="mt-5 w-full max-w-2xl text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wider text-ink-faint">
+                <th className="py-1.5 text-left font-medium">Model</th>
+                <th className="py-1.5 text-right font-medium">Input / 1M</th>
+                <th className="py-1.5 text-right font-medium">Output / 1M</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {Object.values(LLM_MODELS).map((m) => (
-                <tr key={m.name}>
-                  <td className="py-2 text-slate-700">{m.name}</td>
-                  <td className="py-2 text-right font-mono text-slate-600">
+                <tr key={m.name} className="border-t border-line">
+                  <td className="py-2.5 text-ink">{m.name}</td>
+                  <td className="py-2.5 text-right font-mono text-ink-soft">
                     {fmtUSD(m.inputPer1M)}
                   </td>
-                  <td className="py-2 text-right font-mono text-slate-600">
+                  <td className="py-2.5 text-right font-mono text-ink-soft">
                     {fmtUSD(m.outputPer1M)}
                   </td>
                 </tr>
@@ -493,20 +450,38 @@ function SectionHeader({
   icon,
   title,
   subtitle,
-  flush,
 }: {
   icon: ReactNode;
   title: string;
   subtitle: string;
-  flush?: boolean;
 }) {
   return (
-    <div className={flush ? '' : 'mb-4 border-b border-slate-100 pb-3'}>
-      <h2 className="flex items-center gap-2 text-base font-semibold text-slate-800">
-        {icon}
+    <div>
+      <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+        <span className="text-ink-faint">{icon}</span>
         {title}
       </h2>
-      <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      <p className="mt-1 text-sm text-ink-soft">{subtitle}</p>
+    </div>
+  );
+}
+
+function Note({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  tone?: 'neutral' | 'warn';
+}) {
+  const styles =
+    tone === 'warn'
+      ? 'border-warn/30 bg-warn-soft text-ink'
+      : 'border-line bg-paper text-ink-soft';
+  const iconColor = tone === 'warn' ? 'text-warn' : 'text-ink-faint';
+  return (
+    <div className={`mt-4 flex gap-2 rounded-lg border p-3 text-xs ${styles}`}>
+      <Info size={15} strokeWidth={1.75} className={`mt-0.5 shrink-0 ${iconColor}`} />
+      <span className="leading-relaxed">{children}</span>
     </div>
   );
 }
@@ -524,16 +499,14 @@ function NumberField({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-sm font-medium text-slate-700">
-        {label}
-      </label>
+      <label className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
       <input
         type="number"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-md border border-slate-300 p-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+        className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-ink outline-none transition-colors focus:border-accent focus:ring-1 focus:ring-accent"
       />
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+      {hint && <p className="mt-1.5 text-xs text-ink-faint">{hint}</p>}
     </div>
   );
 }
@@ -541,41 +514,30 @@ function NumberField({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-slate-400">{label}</span>
-      <span className="font-mono font-medium text-slate-100">{value}</span>
+      <span className="text-paper/75">{label}</span>
+      <span className="font-mono text-paper">{value}</span>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-slate-800/70 p-2">
-      <div className="truncate font-mono text-sm font-semibold text-slate-100">
+    <div className="rounded-lg bg-panel-soft px-2 py-2.5">
+      <div className="truncate font-mono text-sm font-medium text-paper">
         {value}
       </div>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+      <div className="mt-0.5 text-[10px] uppercase tracking-wide text-paper/65">
         {label}
       </div>
     </div>
   );
 }
 
-function RefItem({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
+function RefItem({ label, value }: { label: string; value: string }) {
   return (
-    <li className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-      <span className="flex items-center gap-2 text-slate-700">
-        {icon}
-        {label}
-      </span>
-      <span className="font-mono text-slate-600">{value}</span>
+    <li className="flex items-center justify-between border-b border-line py-2 last:border-0">
+      <span className="text-ink">{label}</span>
+      <span className="font-mono text-ink-soft">{value}</span>
     </li>
   );
 }
