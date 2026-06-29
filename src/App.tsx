@@ -46,77 +46,52 @@ const LLM_MODELS: Record<LLMKey, LLMModel> = {
   },
 };
 
+/** Blended ($/1M) — average of input & output, used to cost a step. */
+const blendedRate = (m: LLMModel): number => (m.inputPer1M + m.outputPer1M) / 2;
+
 /** Fixed infrastructure unit prices (USD / month) from the breakdown. */
 const INFRA = {
-  postgresPerInstance: 12.41, // Postgres (1 core, 2GB) — holds ~130k resumes / ~2GB
-  vmPerInstance: 36.938, // VM (1 vCPU / 4GB RAM)
-  blobPerGB: 0.18, // Azure Blob storage, $/GB/month
+  postgres: 12.41, // Postgres (1 core, 2GB)
+  vm: 36.938, // VM (1 vCPU / 4GB RAM)
+  blobPerGB: 0.18, // Azure Blob ($/GB/mo) — reference only, see assumptions
 };
 
 /** Capacity + sizing assumptions from the breakdown. */
 const SIZING = {
-  pgInstanceCapacityGB: 2, // a single $12.41 Postgres instance ≈ 2GB ≈ 130k resumes
+  pgInstanceCapacityGB: 2, // a single $12.41 Postgres instance ≈ 2GB
+  kbPerEmbedding: 16, // embedding + metadata per resume in Postgres
   defaultTokensPerResume: 2000, // 1 resume ≈ 2000 tokens
-  defaultPgKbPerResume: 16, // embedding + metadata per resume in Postgres
-  defaultBlobKbPerResume: 50, // raw resume file in Azure Blob (not in source — editable)
 };
 
-/* ------------------------------------------------------------------ *
- *  Feature (token-consuming pipeline step) model
- * ------------------------------------------------------------------ */
+const KB_PER_GB = 1024 * 1024;
 
-type LLMTier = 'extraction' | 'reasoning';
+/** How many resumes the fixed 2GB Postgres tier can hold. */
+const PG_CAPACITY_RESUMES = Math.floor(
+  (SIZING.pgInstanceCapacityGB * KB_PER_GB) / SIZING.kbPerEmbedding,
+);
+
+/* ------------------------------------------------------------------ *
+ *  Pipeline step model — one AI operation performed on a resume
+ * ------------------------------------------------------------------ */
 
 interface Feature {
   id: string;
   name: string;
-  tier: LLMTier;
+  model: LLMKey;
   /** how many times this step runs per resume processed */
   runsPerResume: number;
-  avgInputTokens: number;
-  avgOutputTokens: number;
 }
 
 const INITIAL_FEATURES: Feature[] = [
-  {
-    id: 'f1',
-    name: 'Resume Parsing & Field Extraction',
-    tier: 'extraction',
-    runsPerResume: 1,
-    avgInputTokens: 2000,
-    avgOutputTokens: 600,
-  },
-  {
-    id: 'f2',
-    name: 'Job-Fit Scoring & Ranking',
-    tier: 'reasoning',
-    runsPerResume: 1,
-    avgInputTokens: 3500,
-    avgOutputTokens: 700,
-  },
-  {
-    id: 'f3',
-    name: 'Candidate Summary Generation',
-    tier: 'extraction',
-    runsPerResume: 1,
-    avgInputTokens: 2500,
-    avgOutputTokens: 400,
-  },
-  {
-    id: 'f4',
-    name: 'Screening Q&A Generation',
-    tier: 'reasoning',
-    runsPerResume: 0.5,
-    avgInputTokens: 2000,
-    avgOutputTokens: 800,
-  },
+  { id: 'f1', name: 'Resume Parsing & Field Extraction', model: 'deepseek-flash', runsPerResume: 1 },
+  { id: 'f2', name: 'Job-Fit Scoring & Ranking', model: 'gpt-41', runsPerResume: 1 },
+  { id: 'f3', name: 'Candidate Summary Generation', model: 'deepseek-flash', runsPerResume: 1 },
+  { id: 'f4', name: 'Screening Q&A Generation', model: 'gpt-41', runsPerResume: 0.5 },
 ];
 
 /* ------------------------------------------------------------------ *
  *  Helpers
  * ------------------------------------------------------------------ */
-
-const KB_PER_GB = 1024 * 1024;
 
 const fmtUSD = (n: number, frac = 2): string =>
   n.toLocaleString('en-US', {
@@ -131,14 +106,8 @@ const fmtNum = (n: number): string =>
 
 interface BreakdownLine {
   label: string;
-  group: 'LLM Usage' | 'Compute' | 'Database' | 'Storage';
+  group: 'LLM Usage' | 'Compute' | 'Database';
   cost: number;
-}
-
-interface Architecture {
-  extractionLLM: LLMKey;
-  reasoningLLM: LLMKey;
-  vmCount: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -153,21 +122,11 @@ export default function App() {
   // Volume / traffic
   const [monthlyResumes, setMonthlyResumes] = useState(5000);
   const [totalResumesStored, setTotalResumesStored] = useState(130000);
-  const [pgKbPerResume, setPgKbPerResume] = useState(
-    SIZING.defaultPgKbPerResume,
-  );
-  const [blobKbPerResume, setBlobKbPerResume] = useState(
-    SIZING.defaultBlobKbPerResume,
+  const [tokensPerResume, setTokensPerResume] = useState(
+    SIZING.defaultTokensPerResume,
   );
 
-  // Architecture
-  const [arch, setArch] = useState<Architecture>({
-    extractionLLM: 'deepseek-flash',
-    reasoningLLM: 'gpt-41',
-    vmCount: 1,
-  });
-
-  // Features
+  // Pipeline steps
   const [features, setFeatures] = useState<Feature[]>(INITIAL_FEATURES);
 
   const costs = useMemo(() => {
@@ -175,21 +134,15 @@ export default function App() {
 
     // 1. Variable LLM usage --------------------------------------------------
     let llmTotal = 0;
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
+    let totalTokens = 0;
 
     features.forEach((feat) => {
       const executions = monthlyResumes * feat.runsPerResume;
-      const inTok = executions * feat.avgInputTokens;
-      const outTok = executions * feat.avgOutputTokens;
-      const model =
-        LLM_MODELS[feat.tier === 'extraction' ? arch.extractionLLM : arch.reasoningLLM];
-      const cost =
-        (inTok / 1_000_000) * model.inputPer1M +
-        (outTok / 1_000_000) * model.outputPer1M;
+      const tokens = executions * tokensPerResume;
+      const model = LLM_MODELS[feat.model];
+      const cost = (tokens / 1_000_000) * blendedRate(model);
 
-      totalInputTokens += inTok;
-      totalOutputTokens += outTok;
+      totalTokens += tokens;
       llmTotal += cost;
 
       if (cost > 0) {
@@ -201,37 +154,19 @@ export default function App() {
       }
     });
 
-    // 2. Compute (VMs) -------------------------------------------------------
-    const vmCost = arch.vmCount * INFRA.vmPerInstance;
+    // 2. Fixed infrastructure (1 VM + 1 Postgres) ---------------------------
     breakdown.push({
-      label: `Application VM × ${arch.vmCount} (1 vCPU / 4GB)`,
+      label: 'Application VM (1 vCPU / 4GB)',
       group: 'Compute',
-      cost: vmCost,
+      cost: INFRA.vm,
     });
-
-    // 3. Database (Postgres / pgvector) -------------------------------------
-    const pgRequiredGB = (totalResumesStored * pgKbPerResume) / KB_PER_GB;
-    const pgInstances = Math.max(
-      1,
-      Math.ceil(pgRequiredGB / SIZING.pgInstanceCapacityGB),
-    );
-    const pgCost = pgInstances * INFRA.postgresPerInstance;
     breakdown.push({
-      label: `Postgres + pgvector × ${pgInstances} (${pgRequiredGB.toFixed(2)} GB)`,
+      label: 'Postgres + pgvector (2GB)',
       group: 'Database',
-      cost: pgCost,
+      cost: INFRA.postgres,
     });
 
-    // 4. Object storage (Azure Blob) ----------------------------------------
-    const blobGB = (totalResumesStored * blobKbPerResume) / KB_PER_GB;
-    const blobCost = blobGB * INFRA.blobPerGB;
-    breakdown.push({
-      label: `Azure Blob — raw resumes (${blobGB.toFixed(2)} GB)`,
-      group: 'Storage',
-      cost: blobCost,
-    });
-
-    const fixedTotal = vmCost + pgCost + blobCost;
+    const fixedTotal = INFRA.vm + INFRA.postgres;
     const total = llmTotal + fixedTotal;
 
     return {
@@ -239,22 +174,12 @@ export default function App() {
       llmTotal,
       fixedTotal,
       total,
-      totalInputTokens,
-      totalOutputTokens,
-      pgRequiredGB,
-      pgInstances,
-      blobGB,
+      totalTokens,
       perResume: total / (monthlyResumes || 1),
       annual: total * 12,
+      overCapacity: totalResumesStored > PG_CAPACITY_RESUMES,
     };
-  }, [
-    monthlyResumes,
-    totalResumesStored,
-    pgKbPerResume,
-    blobKbPerResume,
-    arch,
-    features,
-  ]);
+  }, [monthlyResumes, totalResumesStored, tokensPerResume, features]);
 
   // Feature handlers
   const updateFeature = <K extends keyof Feature>(
@@ -272,10 +197,8 @@ export default function App() {
       {
         id: `f${prev.length + 1}-${prev.reduce((m, f) => m + f.name.length, 0)}`,
         name: 'New Step',
-        tier: 'extraction',
+        model: 'deepseek-flash',
         runsPerResume: 1,
-        avgInputTokens: 1000,
-        avgOutputTokens: 300,
       },
     ]);
   };
@@ -286,7 +209,6 @@ export default function App() {
     'LLM Usage': 'text-sky-300',
     Compute: 'text-emerald-300',
     Database: 'text-amber-300',
-    Storage: 'text-fuchsia-300',
   };
 
   return (
@@ -346,62 +268,61 @@ export default function App() {
                     label="Total resumes in database"
                     value={totalResumesStored}
                     onChange={setTotalResumesStored}
-                    hint="Cumulative store — drives Postgres + Blob storage."
+                    hint="Cumulative store — checked against the 2GB Postgres tier."
                   />
                   <NumberField
-                    label="Embedding + metadata / resume (KB)"
-                    value={pgKbPerResume}
-                    onChange={setPgKbPerResume}
-                    hint="Source: 16 KB per resume in Postgres."
-                  />
-                  <NumberField
-                    label="Raw resume file / resume (KB)"
-                    value={blobKbPerResume}
-                    onChange={setBlobKbPerResume}
-                    hint="Stored in Azure Blob (estimate — adjust to taste)."
+                    label="Avg tokens per resume (per step)"
+                    value={tokensPerResume}
+                    onChange={setTokensPerResume}
+                    hint="Source: ~2000 tokens per resume. Priced at each model's blended rate."
                   />
                 </div>
               </section>
 
-              {/* Architecture */}
+              {/* Infrastructure — fixed assumption */}
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3 text-base font-semibold text-slate-800">
                   <Server size={18} className="text-emerald-500" />
-                  Architecture & Infrastructure
+                  Infrastructure
+                  <span className="text-xs font-normal text-slate-400">
+                    (fixed baseline)
+                  </span>
                 </h2>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <SelectField
-                    label="Extraction / Parsing LLM"
-                    value={arch.extractionLLM}
-                    onChange={(v) =>
-                      setArch((a) => ({ ...a, extractionLLM: v as LLMKey }))
-                    }
-                    options={LLM_MODELS}
+                <ul className="space-y-2 text-sm">
+                  <RefItem
+                    icon={<Server size={14} className="text-emerald-500" />}
+                    label="Application VM (1 vCPU / 4GB RAM)"
+                    value={`${fmtUSD(INFRA.vm)} / mo`}
                   />
-                  <SelectField
-                    label="Reasoning / Scoring LLM"
-                    value={arch.reasoningLLM}
-                    onChange={(v) =>
-                      setArch((a) => ({ ...a, reasoningLLM: v as LLMKey }))
-                    }
-                    options={LLM_MODELS}
+                  <RefItem
+                    icon={<Database size={14} className="text-amber-500" />}
+                    label="Postgres + pgvector (1 core, 2GB)"
+                    value={`${fmtUSD(INFRA.postgres)} / mo`}
                   />
-                  <NumberField
-                    label="Application VMs (1 vCPU / 4GB)"
-                    value={arch.vmCount}
-                    onChange={(v) =>
-                      setArch((a) => ({ ...a, vmCount: Math.max(1, v) }))
-                    }
-                    hint={`${fmtUSD(INFRA.vmPerInstance)} / VM / month`}
+                </ul>
+                <div
+                  className={`mt-3 flex gap-2 rounded-lg border p-3 text-xs ${
+                    costs.overCapacity
+                      ? 'border-amber-200 bg-amber-50 text-amber-800'
+                      : 'border-blue-100 bg-blue-50 text-blue-800'
+                  }`}
+                >
+                  <Info
+                    size={16}
+                    className={`mt-0.5 shrink-0 ${
+                      costs.overCapacity ? 'text-amber-500' : 'text-blue-500'
+                    }`}
                   />
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
-                    <div className="mb-1 flex items-center gap-1.5 font-medium text-slate-600">
-                      <Database size={14} /> Auto-scaled Postgres
-                    </div>
-                    {costs.pgInstances} × {fmtUSD(INFRA.postgresPerInstance)}{' '}
-                    instance(s) for {costs.pgRequiredGB.toFixed(2)} GB of vectors
-                    (~{SIZING.pgInstanceCapacityGB} GB each).
-                  </div>
+                  <span>
+                    <strong>Assumption:</strong> a single VM + one 2&nbsp;GB
+                    Postgres instance. The 2&nbsp;GB tier holds embeddings +
+                    metadata for up to{' '}
+                    <strong>~{fmtNum(PG_CAPACITY_RESUMES)} resumes</strong> (16
+                    KB each). {' '}
+                    {costs.overCapacity
+                      ? `Your store of ${fmtNum(totalResumesStored)} exceeds this — additional instances would be needed.`
+                      : 'Beyond that, additional instances would be added.'}
+                  </span>
                 </div>
               </section>
             </div>
@@ -432,15 +353,9 @@ export default function App() {
 
                 <div className="mb-5 rounded-lg bg-slate-800/70 p-3 text-xs text-slate-400">
                   <div className="flex justify-between">
-                    <span>Input tokens / mo</span>
+                    <span>LLM tokens / mo</span>
                     <span className="font-mono text-slate-200">
-                      {fmtNum(costs.totalInputTokens)}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex justify-between">
-                    <span>Output tokens / mo</span>
-                    <span className="font-mono text-slate-200">
-                      {fmtNum(costs.totalOutputTokens)}
+                      {fmtNum(costs.totalTokens)}
                     </span>
                   </div>
                 </div>
@@ -486,8 +401,8 @@ export default function App() {
                     AI Pipeline Steps
                   </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Each step runs per resume. Token volume drives usage-based
-                    LLM cost.
+                    Each AI operation run on a resume, the model it uses, and how
+                    often it runs. This is what drives the usage-based LLM cost.
                   </p>
                 </div>
                 <button
@@ -499,14 +414,14 @@ export default function App() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-left text-sm">
+                <table className="w-full min-w-[560px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
                     <tr>
                       <th className="rounded-l-lg p-3">Step</th>
-                      <th className="p-3">LLM Tier</th>
-                      <th className="p-3">Runs / Resume</th>
-                      <th className="p-3">Avg Input Tok</th>
-                      <th className="p-3">Avg Output Tok</th>
+                      <th className="p-3">LLM Model</th>
+                      <th className="p-3" title="How many times this step runs per resume">
+                        Runs / Resume
+                      </th>
                       <th className="rounded-r-lg p-3" />
                     </tr>
                   </thead>
@@ -525,18 +440,21 @@ export default function App() {
                         </td>
                         <td className="p-2">
                           <select
-                            value={feat.tier}
+                            value={feat.model}
                             onChange={(e) =>
                               updateFeature(
                                 feat.id,
-                                'tier',
-                                e.target.value as LLMTier,
+                                'model',
+                                e.target.value as LLMKey,
                               )
                             }
                             className="w-full rounded border border-slate-300 bg-white p-2 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
                           >
-                            <option value="extraction">Extraction LLM</option>
-                            <option value="reasoning">Reasoning LLM</option>
+                            {Object.entries(LLM_MODELS).map(([key, m]) => (
+                              <option key={key} value={key}>
+                                {m.name}
+                              </option>
+                            ))}
                           </select>
                         </td>
                         <td className="p-2">
@@ -548,34 +466,6 @@ export default function App() {
                               updateFeature(
                                 feat.id,
                                 'runsPerResume',
-                                Number(e.target.value),
-                              )
-                            }
-                            className="w-24 rounded border border-slate-300 p-2 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            value={feat.avgInputTokens}
-                            onChange={(e) =>
-                              updateFeature(
-                                feat.id,
-                                'avgInputTokens',
-                                Number(e.target.value),
-                              )
-                            }
-                            className="w-28 rounded border border-slate-300 p-2 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-                          />
-                        </td>
-                        <td className="p-2">
-                          <input
-                            type="number"
-                            value={feat.avgOutputTokens}
-                            onChange={(e) =>
-                              updateFeature(
-                                feat.id,
-                                'avgOutputTokens',
                                 Number(e.target.value),
                               )
                             }
@@ -595,6 +485,16 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="mt-4 flex gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
+                <Info size={16} className="mt-0.5 shrink-0 text-blue-500" />
+                <span>
+                  Each step is costed at <strong>~{fmtNum(tokensPerResume)} tokens
+                  / resume</strong> (from Cost breakdown.md), priced at the
+                  selected model's blended input/output rate. Adjust the token
+                  figure on the Calculator tab.
+                </span>
               </div>
             </section>
 
@@ -643,25 +543,26 @@ export default function App() {
                     <RefItem
                       icon={<Server size={14} className="text-emerald-500" />}
                       label="VM (1 vCPU / 4GB RAM)"
-                      value={`${fmtUSD(INFRA.vmPerInstance)} / mo`}
+                      value={`${fmtUSD(INFRA.vm)} / mo`}
                     />
                     <RefItem
                       icon={<Database size={14} className="text-amber-500" />}
-                      label="Postgres (1 core, 2GB ≈ 130k resumes)"
-                      value={`${fmtUSD(INFRA.postgresPerInstance)} / mo`}
+                      label="Postgres (1 core, 2GB)"
+                      value={`${fmtUSD(INFRA.postgres)} / mo`}
                     />
                     <RefItem
                       icon={<HardDrive size={14} className="text-fuchsia-500" />}
-                      label="Azure Blob storage"
+                      label="Azure Blob (raw resume storage)"
                       value={`${fmtUSD(INFRA.blobPerGB)} / GB / mo`}
                     />
                   </ul>
-                  <div className="mt-3 flex gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-blue-800">
-                    <Info size={16} className="mt-0.5 shrink-0 text-blue-500" />
+                  <div className="mt-3 flex gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+                    <Info size={16} className="mt-0.5 shrink-0 text-slate-400" />
                     <span>
                       Resume ≈ 2000 tokens · 16 KB embedding+metadata in
-                      Postgres. Embedding generation runs on the application VM
-                      (no per-token API cost).
+                      Postgres (2 GB ≈ {fmtNum(PG_CAPACITY_RESUMES)} resumes).
+                      Raw-file blob storage is negligible (~$0.18/GB) and is not
+                      itemized in the live estimate.
                     </span>
                   </div>
                 </div>
@@ -701,37 +602,6 @@ function NumberField({
         className="w-full rounded-md border border-slate-300 p-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
       />
       {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
-    </div>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: Record<string, { name: string }>;
-}) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-slate-700">
-        {label}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-slate-300 bg-slate-50 p-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-      >
-        {Object.entries(options).map(([key, val]) => (
-          <option key={key} value={key}>
-            {val.name}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
