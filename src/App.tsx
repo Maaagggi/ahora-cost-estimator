@@ -122,8 +122,8 @@ interface BreakdownLine {
 
 export default function App() {
   // Volume / traffic
-  const [monthlyResumes, setMonthlyResumes] = useState(5000);
-  const [totalResumesStored, setTotalResumesStored] = useState(130000);
+  const [monthlyResumes, setMonthlyResumes] = useState(500);
+  const [totalResumesStored, setTotalResumesStored] = useState(0);
 
   // Pipeline steps
   const [features, setFeatures] = useState<Feature[]>(INITIAL_FEATURES);
