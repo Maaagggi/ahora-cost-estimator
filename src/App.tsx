@@ -112,8 +112,8 @@ interface BreakdownLine {
   label: string;
   group: 'LLM Usage' | 'Infrastructure';
   cost: number;
-  /** per-line explanation (token usage + cost split for LLM steps) */
-  detail?: string;
+  /** per-line explanation rows (token × rate = cost for LLM steps) */
+  detail?: string[];
 }
 
 /* ------------------------------------------------------------------ *
@@ -150,9 +150,10 @@ export default function App() {
         label: `${feat.name} · ${model.name}`,
         group: 'LLM Usage',
         cost,
-        detail:
-          `${fmtCompact(inTokens)} in (${fmtUSD(inCost)}) + ` +
-          `${fmtCompact(outTokens)} out (${fmtUSD(outCost)})`,
+        detail: [
+          `${fmtCompact(inTokens)} input × ${fmtUSD(model.inputPer1M)}/M = ${fmtUSD(inCost)}`,
+          `${fmtCompact(outTokens)} output × ${fmtUSD(model.outputPer1M)}/M = ${fmtUSD(outCost)}`,
+        ],
       });
     });
 
@@ -409,9 +410,13 @@ export default function App() {
                 <Stat label="Tokens / mo" value={fmtCompact(costs.totalTokens)} />
               </div>
 
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 Cost breakdown
               </h3>
+              <p className="mb-3 text-[11px] text-slate-500">
+                Monthly tokens = {fmtNum(monthlyResumes)} resumes ×{' '}
+                ({fmtNum(INPUT_TOKENS)} in + {fmtNum(OUTPUT_TOKENS)} out) per step.
+              </p>
               <div className="space-y-2">
                 {costs.breakdown.map((item, idx) => (
                   <div
@@ -432,8 +437,10 @@ export default function App() {
                       </span>
                     </div>
                     {item.detail && (
-                      <div className="mt-1 pl-3.5 font-mono text-[11px] text-slate-500">
-                        {item.detail}
+                      <div className="mt-1 space-y-0.5 pl-3.5 font-mono text-[11px] text-slate-500">
+                        {item.detail.map((line, i) => (
+                          <div key={i}>{line}</div>
+                        ))}
                       </div>
                     )}
                   </div>
