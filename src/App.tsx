@@ -84,10 +84,10 @@ interface Feature {
 }
 
 const INITIAL_FEATURES: Feature[] = [
-  { id: 'f1', name: 'Resume Parsing & Field Extraction', model: 'deepseek-flash' },
-  { id: 'f2', name: 'Job-Fit Scoring & Ranking', model: 'gpt-41' },
-  { id: 'f3', name: 'Candidate Summary Generation', model: 'deepseek-flash' },
-  { id: 'f4', name: 'Screening Q&A Generation', model: 'gpt-41' },
+  { id: 'f1', name: 'Resume Parsing & Field Extraction', model: 'deepseek-pro' },
+  { id: 'f2', name: 'Job-Fit Scoring & Ranking', model: 'deepseek-pro' },
+  { id: 'f3', name: 'Candidate Summary Generation', model: 'deepseek-pro' },
+  { id: 'f4', name: 'Screening Q&A Generation', model: 'deepseek-pro' },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -192,7 +192,7 @@ export default function App() {
       {
         id: `f${prev.length + 1}-${prev.reduce((m, f) => m + f.name.length, 0)}`,
         name: 'New Step',
-        model: 'deepseek-flash',
+        model: 'deepseek-pro',
       },
     ]);
   };
